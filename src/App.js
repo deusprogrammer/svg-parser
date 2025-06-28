@@ -73,7 +73,7 @@ function App() {
   // // Export the model to SVG
   // const svg = makerjs.exporter.toSVG(stage);
 
-  const argsToPoints = (args) => {
+  const argsToPoints = (args, transform) => {
     if (!args || args.length < 2) return [];
     return args.reduce((acc, val, index) => {
       if (index % 2 === 0) {
@@ -83,7 +83,7 @@ function App() {
     }, []);
   };
 
-  const argsToPointsRelative = (args, currentPoint) => {
+  const argsToPointsRelative = (args, currentPoint, transform) => {
     if (!args || args.length < 2) return [];
     return args.reduce((acc, val, index) => {
       if (index % 2 === 0) {
@@ -93,17 +93,17 @@ function App() {
     }, []);
   };
 
-  const getLastPoint = (args) => {
+  const getLastPoint = (args, transform) => {
     if (!args || args.length < 2) return null;
     return [args[args.length - 2], args[args.length - 1]];
   };
 
-  const getLastPointRelative = (args, currentPoint) => {
+  const getLastPointRelative = (args, currentPoint, transform) => {
     if (!args || args.length < 2) return null;
     return [currentPoint[0] + args[args.length - 2], currentPoint[1] + args[args.length - 1]];
   };
 
-  const convertPathToInstructions = (path) => {
+  const convertPathToInstructions = (path, transform) => {
     if (!path) return null;
     const instructions = [];
     // Tokenize: match commands or numbers (including exponents)
@@ -146,17 +146,17 @@ function App() {
             instructions.push({
               command: commandString, argCount: args.length, 
               type: 'bezier',
-              points: argsToPoints(args),
+              points: argsToPoints(args, transform),
             });
-            currentPoint = getLastPoint(args);
+            currentPoint = getLastPoint(args, transform);
             break;
           case 'Q':
             instructions.push({
               command: commandString, argCount: args.length, 
               type: 'quadratic',
-              points: argsToPoints(args),
+              points: argsToPoints(args, transform),
             });
-            currentPoint = getLastPoint(args);
+            currentPoint = getLastPoint(args, transform);
             break;
           case 'A': // Arc
             const rx = args[0], ry = args[1], xAxisRotation = args[2],
@@ -195,7 +195,7 @@ function App() {
                 [args[2], args[3]],
               ],
             });
-            currentPoint = getLastPoint(args);
+            currentPoint = getLastPoint(args, transform);
             break;
           case 'T': // Smooth quadratic Bezier curve
             const prevQuadCommand = instructions[instructions.length - 1];
@@ -209,7 +209,7 @@ function App() {
                 [args[0], args[1]],
               ],
             });
-            currentPoint = getLastPoint(args);
+            currentPoint = getLastPoint(args, transform);
             break;
           case 'm': // Move to (relative)
             currentPoint = [currentPoint[0] + args[0], currentPoint[1] + args[1]];
@@ -223,17 +223,17 @@ function App() {
             instructions.push({
               command: commandString, argCount: args.length, 
               type: 'bezier',
-              points: argsToPointsRelative(args, currentPoint),
+              points: argsToPointsRelative(args, currentPoint, transform),
             });
-            currentPoint = getLastPointRelative(args, currentPoint);
+            currentPoint = getLastPointRelative(args, currentPoint, transform);
             break;
           case 'q': // Quadratic Bezier curve (relative)
             instructions.push({
               command: commandString, argCount: args.length, 
               type: 'quadratic',
-              points: argsToPointsRelative(args, currentPoint),
+              points: argsToPointsRelative(args, currentPoint, transform),
             });
-            currentPoint = getLastPointRelative(args, currentPoint);
+            currentPoint = getLastPointRelative(args, currentPoint,transform);
             break;
           case 'a': // Arc (relative)
             const relRx = args[0], relRy = args[1], relXAxisRotation = args[2],
@@ -249,7 +249,7 @@ function App() {
               sweepFlag: relSweepFlag,
               point: [relX, relY],
             });
-            currentPoint = getLastPointRelative(args, currentPoint);
+            currentPoint = getLastPointRelative(args, currentPoint, transform);
             break;
           case 'h': // Horizontal line to (relative)
             currentPoint[0] += args[0];
@@ -272,7 +272,7 @@ function App() {
                 [currentPoint[0] + args[2], currentPoint[1] + args[3]],
               ],
             });
-            currentPoint = getLastPointRelative(args, currentPoint);
+            currentPoint = getLastPointRelative(args, currentPoint, transform);
             break;
           case 't': // Smooth quadratic Bezier curve (relative)
             const prevQuadBezierCommand = instructions[instructions.length - 1];
@@ -286,7 +286,7 @@ function App() {
                 [currentPoint[0] + args[0], currentPoint[1] + args[1]],
               ],
             });
-            currentPoint = getLastPointRelative(args, currentPoint);
+            currentPoint = getLastPointRelative(args, currentPoint, transform);
             break;
           case 'Z': // Close path
           case 'z':
@@ -396,7 +396,8 @@ function App() {
           transform: extractTransform(svgData.attributes.transform),
           d: svgData.attributes.d.replace(/(?<![eE])-/g, ' -'),
           instructions: convertPathToInstructions(
-            svgData.attributes.d.replace(/(?<![eE])-/g, ' -')
+            svgData.attributes.d.replace(/(?<![eE])-/g, ' -'),
+            extractTransform(svgData.attributes.transform)
           ),
           fill: svgData.attributes.fill,
           stroke: svgData.attributes.stroke,
