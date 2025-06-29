@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { parse } from 'svgson';
 import makerjs from 'makerjs';
+import { Container, Stage, Graphics } from '@pixi/react'
 
 function App() {
   const [svgJson, setSvgJson] = useState(null);
@@ -11,6 +12,7 @@ function App() {
     if (!file) return;
     const text = await file.text();
     const json = await parse(text);
+    console.log("SVG: " + JSON.stringify(json, null, 5));
     setSvgJson(json);
   };
 
@@ -120,6 +122,11 @@ function App() {
         m: 2, l: 2, h: 1, v: 1, c: 6, s: 4, q: 4, t: 2, a: 7,
         Z: 0, z: 0
       };
+
+      if ((type === 'z' || type === 'Z') && i >= tokens.length) {
+        instructions.push({ command: 'z', argCount: 0, type: 'close' });
+      }
+
       const argsNeeded = argCounts[type];
       // Some commands can have multiple sets of arguments (e.g., "C" with 12 numbers = 2 segments)
       while (i < tokens.length) {
@@ -130,9 +137,7 @@ function App() {
           args.push(Number(tokens[i++]));
         }
         if (args.length < argsNeeded) break;
-        // Reconstruct the command string for debugging
         const commandString = type + args.join(' ');
-        // ...switch/case logic as before, but use 'type', 'args', and 'commandString'...
         switch (type) {
           case 'M':
             currentPoint = [args[0], args[1]];
@@ -324,34 +329,43 @@ function App() {
   const extractTransform = (transformString) => {
     if (!transformString) return null;
     let transform = {};
+    // translate
     const match = transformString.match(/translate\(([^)]+)\)/);
     if (match) {
-      const [x, y] = match[1].split(',').map(Number);
-      transform.translate = { x, y };
+      const [x, y] = match[1].trim().split(/[\s,]+/).map(Number);
+      transform.translate = { x, y: y || 0 };
     }
+    // scale
     const scaleMatch = transformString.match(/scale\(([^)]+)\)/);
     if (scaleMatch) {
-      const [sx, sy] = scaleMatch[1].split(',').map(Number);
-      transform.scale = { x: sx, y: sy || sx }; // If sy is not provided, assume uniform scaling
+      const [sx, sy] = scaleMatch[1].trim().split(/[\s,]+/).map(Number);
+      transform.scale = { x: sx, y: sy !== undefined ? sy : sx };
     }
+    // rotate
     const rotateMatch = transformString.match(/rotate\(([^)]+)\)/);
     if (rotateMatch) {
-      const angle = parseFloat(rotateMatch[1]);
+      const [angle, cx, cy] = rotateMatch[1].trim().split(/[\s,]+/).map(Number);
       transform.rotate = angle;
+      if (cx !== undefined && cy !== undefined) {
+        transform.rotateCenter = { x: cx, y: cy };
+      }
     }
+    // skewX
     const skewXMatch = transformString.match(/skewX\(([^)]+)\)/);
     if (skewXMatch) {
       const angle = parseFloat(skewXMatch[1]);
       transform.skewX = angle;
     }
+    // skewY
     const skewYMatch = transformString.match(/skewY\(([^)]+)\)/);
     if (skewYMatch) {
       const angle = parseFloat(skewYMatch[1]);
       transform.skewY = angle;
     }
+    // matrix
     const matrixMatch = transformString.match(/matrix\(([^)]+)\)/);
     if (matrixMatch) {
-      const matrixValues = matrixMatch[1].split(',').map(Number);
+      const matrixValues = matrixMatch[1].trim().split(/[\s,]+/).map(Number);
       if (matrixValues.length === 6) {
         transform = {
           ...transform,
@@ -408,10 +422,12 @@ function App() {
           type: 'rectangle',
           transform: extractTransform(svgData.attributes.transform),
           attributes: svgData.attributes,
-          x: svgData.attributes.x,
-          y: svgData.attributes.y,
-          width: svgData.attributes.width,
-          height: svgData.attributes.height,
+          x: Number(svgData.attributes.x),
+          y: Number(svgData.attributes.y),
+          rx: Number(svgData.attributes.rx),
+          ry: Number(svgData.attributes.ry),
+          width: Number(svgData.attributes.width),
+          height: Number(svgData.attributes.height),
           fill: svgData.attributes.fill,
           stroke: svgData.attributes.stroke,
           strokeWidth: svgData.attributes['stroke-width'],
@@ -420,9 +436,9 @@ function App() {
         return {
           type: 'circle',
           transform: extractTransform(svgData.attributes.transform),
-          cx: svgData.attributes.cx,
-          cy: svgData.attributes.cy,
-          r: svgData.attributes.r,
+          cx: Number(svgData.attributes.cx),
+          cy: Number(svgData.attributes.cy),
+          r: Number(svgData.attributes.r),
           fill: svgData.attributes.fill,
           stroke: svgData.attributes.stroke,
           strokeWidth: svgData.attributes['stroke-width'],
@@ -430,6 +446,147 @@ function App() {
       default:
         return null;
     }
+  }
+
+  const drawPath = (g, instructions) => {
+    g.clear();
+    g.lineStyle(2, 0x000000, 1);
+    let subpathStart = null;
+
+    instructions?.forEach(({ type, points, point, rx, ry, xAxisRotation, largeArcFlag, sweepFlag }) => {
+      if (type === 'move') {
+        g.moveTo(point[0], point[1]);
+        subpathStart = [point[0], point[1]];
+      } else if (type === 'line') {
+        g.lineStyle(2, 0x000000, 1);
+        g.lineTo(point[0], point[1]);
+      } else if (type === 'quadratic') {
+        if (!points || points.length !== 2) return;
+        g.moveTo(points[0][0], points[0][1]);
+        g.lineStyle(2, 0x000000, 1);
+        g.quadraticCurveTo(
+          points[1][0], points[1][1],
+          points[2][0], points[2][1]
+        );
+      } else if (type === 'bezier') {
+        if (!points || points.length !== 3) return;
+        g.lineStyle(2, 0x000000, 1);
+        g.bezierCurveTo(
+          points[0][0], points[0][1],
+          points[1][0], points[1][1],
+          points[2][0], points[2][1]
+        );
+      } else if (type === 'arc') {
+        // Unimplemented
+      } else if (type === 'close') {
+        if (subpathStart) {
+          g.lineTo(subpathStart[0], subpathStart[1]);
+        }
+      }
+    });
+  }
+
+  const drawEllipticalRoundedRect = (g, x, y, width, height, rx, ry) => {
+    g.clear();
+    g.lineStyle(2, 0x000000, 1);
+
+    // Ensure rx and ry are numbers and do not exceed half width/height
+    const _rx = Math.min(Number(rx) || 0, width / 2);
+    const _ry = Math.min(Number(ry) || 0, height / 2);
+
+    if (!_rx && !_ry) {
+      g.drawRect(x, y, width, height);
+      return;
+    }
+
+    // Start at top-left corner, after the horizontal radius
+    g.moveTo(x + _rx, y);
+
+    // Top edge
+    g.lineTo(x + width - _rx, y);
+
+    // Top-right corner (elliptical arc)
+    g.arc(
+      x + width - _rx, y + _ry,
+      _rx, Math.PI * 1.5, 0, false
+    );
+
+    // Right edge
+    g.lineTo(x + width, y + height - _ry);
+
+    // Bottom-right corner (elliptical arc)
+    g.arc(
+      x + width - _rx, y + height - _ry,
+      _rx, 0, Math.PI * 0.5, false
+    );
+
+    // Bottom edge
+    g.lineTo(x + _rx, y + height);
+
+    // Bottom-left corner (elliptical arc)
+    g.arc(
+      x + _rx, y + height - _ry,
+      _rx, Math.PI * 0.5, Math.PI, false
+    );
+
+    // Left edge
+    g.lineTo(x, y + _ry);
+
+    // Top-left corner (elliptical arc)
+    g.arc(
+      x + _rx, y + _ry,
+      _rx, Math.PI, Math.PI * 1.5, false
+    );
+  }
+
+  const renderModelTree = (modelTree) => {
+    if (!modelTree) {
+      return null;
+    }
+
+    let graphicsToDraw = [];
+
+    const { type, instructions, children, transform, r, cx, cy, x, y, rx, ry, width, height } = modelTree;
+
+    if (type === 'path') {
+      graphicsToDraw.push(
+        <Graphics
+          draw={(g) => drawPath(g, instructions)}
+        />
+      );
+    } else if (type === 'circle') {
+      graphicsToDraw.push(
+        <Graphics
+          draw={(g) => {
+            g.clear();
+            g.lineStyle(2, 0x000000, 1);
+            g.drawCircle(cx, cy, r);
+          }}
+        />
+      );
+    } else if (type === 'rectangle') {
+      graphicsToDraw.push(
+        <Graphics
+          draw={(g) => {
+            g.clear();
+            g.lineStyle(2, 0x000000, 1);
+            drawEllipticalRoundedRect(g, x, y, width, height, rx, ry);
+          }}
+        />
+      );
+    }
+
+    if (children) {
+      children.forEach((child) => {
+        graphicsToDraw = [...graphicsToDraw, renderModelTree(child)];
+      })
+    }
+
+    return (
+      <Container x={transform?.translate?.x || 0} y={transform?.translate?.y || 0} scale={{ x: transform?.scale?.x || 1, y: transform?.scale?.y || 1 }}>
+        {graphicsToDraw}
+      </Container>
+    )
   }
 
   const svgObject = parseSvgStructure(svgJson);
@@ -441,13 +598,24 @@ function App() {
           Load SVG:&nbsp;
           <input type="file" accept=".svg" onChange={handleFileChange} />
         </label>
+        <Stage
+          width={svgObject?.header.viewBox.width * 2 || 1}
+          height={svgObject?.header.viewBox.height * 2 || 1}
+          options={{ backgroundColor: 0xffffff }}
+        >
+          <Container
+            x={-svgObject?.header.viewBox.x + 10 || 0}
+            y={-svgObject?.header.viewBox.y + 10 || 0}
+          >
+            {renderModelTree(svgObject)}
+          </Container>
+        </Stage>
         {svgJson && (
           <pre style={{ background: '#f0f0f0', marginTop: 16, whiteSpace: 'pre-wrap' }}>
             {JSON.stringify(svgObject, null, 2)}
           </pre>
         )}
       </div>
-      {/* <div dangerouslySetInnerHTML={{ __html: svg }} /> */}
     </div>
   );
 }
